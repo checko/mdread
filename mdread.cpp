@@ -53,14 +53,15 @@ std::string replace_all(std::string str, const std::string& from, const std::str
 }
 
 void render_markdown(const std::string& content) {
-    int width = get_terminal_width();
-    bool in_code_block = false;
-    std::string line;
-    std::istringstream stream(content);
+    try {
+        int width = get_terminal_width();
+        bool in_code_block = false;
+        std::string line;
+        std::istringstream stream(content);
 
     while (std::getline(stream, line)) {
         // Handle code blocks
-        if (line == "```") {
+        if (line.substr(0, 3) == "```") {
             in_code_block = !in_code_block;
             std::cout << Ansi::GREEN;
             for(int i = 0; i < width; i++) std::cout << "─";
@@ -69,7 +70,9 @@ void render_markdown(const std::string& content) {
         }
 
         if (in_code_block) {
-            std::cout << Ansi::REVERSE << line << std::string(width - line.length(), ' ') << Ansi::RESET << std::endl;
+            // In code blocks, print the line directly without any processing
+            std::string spaces = (line.length() < width) ? std::string(width - line.length(), ' ') : "";
+            std::cout << Ansi::REVERSE << line << spaces << Ansi::RESET << std::endl;
             continue;
         }
 
@@ -145,6 +148,9 @@ void render_markdown(const std::string& content) {
             Ansi::REVERSE + "$1" + Ansi::RESET);
 
         std::cout << processed << std::endl;
+    }
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Error processing markdown content: " + std::string(e.what()));
     }
 }
 
