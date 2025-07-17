@@ -72,10 +72,10 @@ def render_markdown(content):
             continue
 
         # Images: ![alt](src)
-        line = re.sub(r'!\((.*?)\)\[(.*?)\]', lambda m: Ansi.BOLD + '[Image: ' + m.group(1) + ']' + Ansi.RESET + ' (' + Ansi.UNDERLINE + m.group(2) + Ansi.RESET + ')', line)
+        line = re.sub(r'!\[(.*?)\]\((.*?)\)', lambda m: Ansi.BOLD + '[Image: ' + m.group(1) + ']' + Ansi.RESET + ' (' + Ansi.UNDERLINE + m.group(2) + Ansi.RESET + ')', line)
         
         # Links: [text](url)
-        line = re.sub(r'\((.*?)\)\[(.*?)\]', lambda m: m.group(1) + ' (' + Ansi.UNDERLINE + Ansi.BLUE + m.group(2) + Ansi.RESET + ')', line)
+        line = re.sub(r'\[(.*?)\]\((.*?)\)', lambda m: m.group(1) + ' (' + Ansi.UNDERLINE + Ansi.BLUE + m.group(2) + Ansi.RESET + ')', line)
 
         # Bold: **text** or __text__
         line = re.sub(r'\*\*(.*?)\*\*|__(.*?)__', lambda m: Ansi.BOLD + (m.group(1) or m.group(2)) + Ansi.RESET, line)
