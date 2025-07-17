@@ -15,6 +15,22 @@ dist/
 build/
 *.egg-info/
 
+# C++ specific
+*.slo
+*.lo
+*.o
+*.obj
+*.exe
+*.out
+*.app
+mdread
+
+# CMake files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
 # OS-specific
 .DS_Store
 Thumbs.db
