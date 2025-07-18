@@ -6,6 +6,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <clocale>
+#include <termios.h>
 
 class Ansi {
 public:
@@ -32,10 +33,11 @@ const std::string Ansi::MAGENTA = "\033[35m";
 const std::string Ansi::CYAN = "\033[36m";
 const std::string Ansi::REVERSE = "\033[7m";
 
-int get_terminal_width() {
+void get_terminal_size(int& rows, int& cols) {
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    return w.ws_col > 0 ? w.ws_col : 80;
+    rows = w.ws_row > 0 ? w.ws_row : 24;
+    cols = w.ws_col > 0 ? w.ws_col : 80;
 }
 
 std::string center_text(const std::string& text, int width) {
@@ -43,114 +45,162 @@ std::string center_text(const std::string& text, int width) {
     return std::string(padding, ' ') + text + std::string(padding, ' ');
 }
 
-std::string replace_all(std::string str, const std::string& from, const std::string& to) {
-    size_t pos = 0;
-    while((pos = str.find(from, pos)) != std::string::npos) {
-        str.replace(pos, from.length(), to);
-        pos += to.length();
-    }
-    return str;
-}
-
-void render_markdown(const std::string& content) {
-    try {
-        int width = get_terminal_width();
-        bool in_code_block = false;
-        std::string line;
-        std::istringstream stream(content);
+std::vector<std::string> render_markdown(const std::string& content) {
+    int rows, width;
+    get_terminal_size(rows, width);
+    bool in_code_block = false;
+    std::vector<std::string> rendered_lines;
+    std::string line;
+    std::istringstream stream(content);
 
     while (std::getline(stream, line)) {
-        // Handle code blocks
         if (line.substr(0, 3) == "```") {
             in_code_block = !in_code_block;
-            std::cout << Ansi::GREEN;
-            for(int i = 0; i < width; i++) std::cout << "─";
-            std::cout << Ansi::RESET << std::endl;
+            std::string separator;
+            for (int i = 0; i < width; ++i) {
+                separator += "─";
+            }
+            rendered_lines.push_back(Ansi::GREEN + separator + Ansi::RESET);
             continue;
         }
 
         if (in_code_block) {
-            // In code blocks, print the line directly without any processing
             std::string spaces = (line.length() < width) ? std::string(width - line.length(), ' ') : "";
-            std::cout << Ansi::REVERSE << line << spaces << Ansi::RESET << std::endl;
+            rendered_lines.push_back(Ansi::REVERSE + line + spaces + Ansi::RESET);
             continue;
         }
 
-        // Headings
         if (line[0] == '#') {
             size_t level = line.find_first_not_of('#');
             std::string text = line.substr(level + 1);
             if (level == 1) {
-                std::cout << "\n" << Ansi::BOLD << Ansi::YELLOW << center_text(text, width) << Ansi::RESET << std::endl;
-                std::cout << center_text(std::string(text.length(), '='), width) << std::endl;
+                rendered_lines.push_back("");
+                rendered_lines.push_back(Ansi::BOLD + Ansi::YELLOW + center_text(text, width) + Ansi::RESET);
+                rendered_lines.push_back(center_text(std::string(text.length(), '='), width));
             } else {
-                std::cout << "\n" << Ansi::BOLD << Ansi::CYAN << text << Ansi::RESET << std::endl;
+                rendered_lines.push_back("");
+                rendered_lines.push_back(Ansi::BOLD + Ansi::CYAN + text + Ansi::RESET);
             }
             continue;
         }
 
-        // Horizontal Rule
         if (line == "---" || line == "***" || line == "___") {
-            std::cout << Ansi::BOLD;
-            for(int i = 0; i < width; i++) std::cout << "─";
-            std::cout << Ansi::RESET << std::endl;
+            std::string separator;
+            for (int i = 0; i < width; ++i) {
+                separator += "─";
+            }
+            rendered_lines.push_back(Ansi::BOLD + separator + Ansi::RESET);
             continue;
         }
 
-        // Blockquotes
         if (line[0] == '>') {
-            std::cout << Ansi::YELLOW << "|" << Ansi::RESET << " " << line.substr(1) << std::endl;
+            rendered_lines.push_back(Ansi::YELLOW + "|" + Ansi::RESET + " " + line.substr(1));
             continue;
         }
 
-        // Lists
         if (line.substr(0, 2) == "* " || line.substr(0, 2) == "- ") {
-            std::cout << "  • " << line.substr(2) << std::endl;
+            rendered_lines.push_back("  • " + line.substr(2));
             continue;
         }
 
-        // Ordered Lists
         std::regex ordered_list_regex(R"(^\d+\.\s+.*)");
         if (std::regex_match(line, ordered_list_regex)) {
             size_t dot_pos = line.find('.');
-            std::cout << "  " << line.substr(0, dot_pos + 1) << " " 
-                     << line.substr(dot_pos + 2) << std::endl;
+            rendered_lines.push_back("  " + line.substr(0, dot_pos + 1) + " " + line.substr(dot_pos + 2));
             continue;
         }
 
-        // Inline formatting
         std::string processed = line;
-
-        // Images
-        processed = std::regex_replace(processed, 
-            std::regex(R"(!\[(.*?)\]\((.*?)\))"),
-            Ansi::BOLD + std::string("[Image: $1]") + Ansi::RESET + 
-            " (" + Ansi::UNDERLINE + "$2" + Ansi::RESET + ")");
-
-        // Links
-        processed = std::regex_replace(processed, 
-            std::regex(R"(\[(.*?)\]\((.*?)\))"),
-            "$1 (" + Ansi::UNDERLINE + Ansi::BLUE + "$2" + Ansi::RESET + ")");
-
-        // Bold
-        processed = std::regex_replace(processed, 
-            std::regex(R"(\*\*(.*?)\*\*|__(.*?)__)"),
-            Ansi::BOLD + "$1$2" + Ansi::RESET);
-
-        // Italics
-        processed = std::regex_replace(processed, 
-            std::regex(R"(\*(.*?)\*|_(.*?)_)"),
-            Ansi::UNDERLINE + "$1$2" + Ansi::RESET);
-
-        // Inline code
-        processed = std::regex_replace(processed, 
-            std::regex(R"(`(.*?)`)"),
-            Ansi::REVERSE + "$1" + Ansi::RESET);
-
-        std::cout << processed << std::endl;
+        processed = std::regex_replace(processed, std::regex(R"(!\[(.*?)\]\((.*?)\))"), Ansi::BOLD + std::string("[Image: $1]") + Ansi::RESET + " (" + Ansi::UNDERLINE + "$2" + Ansi::RESET + ")");
+        processed = std::regex_replace(processed, std::regex(R"(\[(.*?)\]\((.*?)\))"), "$1 (" + Ansi::UNDERLINE + Ansi::BLUE + "$2" + Ansi::RESET + ")");
+        processed = std::regex_replace(processed, std::regex(R"(\*\*(.*?)\*\*|__(.*?)__)"), Ansi::BOLD + "$1$2" + Ansi::RESET);
+        processed = std::regex_replace(processed, std::regex(R"(\*(.*?)\*|_(.*?)_)"), Ansi::UNDERLINE + "$1$2" + Ansi::RESET);
+        processed = std::regex_replace(processed, std::regex(R"(`(.*?)`)"), Ansi::REVERSE + "$1" + Ansi::RESET);
+        rendered_lines.push_back(processed);
     }
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Error processing markdown content: " + std::string(e.what()));
+    return rendered_lines;
+}
+
+char get_char() {
+    struct termios oldattr, newattr;
+    int ch;
+    tcgetattr( STDIN_FILENO, &oldattr );
+    newattr = oldattr;
+    newattr.c_lflag &= ~( ICANON | ECHO );
+    tcsetattr( STDIN_FILENO, TCSANOW, &newattr );
+    ch = getchar();
+    tcsetattr( STDIN_FILENO, TCSANOW, &oldattr );
+    return ch;
+}
+
+void pager(const std::vector<std::string>& lines) {
+    int height, width;
+    get_terminal_size(height, width);
+    int top = 0;
+    const int page_size = height > 1 ? height - 1 : 1;
+    const int max_top = lines.size() > page_size ? lines.size() - page_size : 0;
+
+    if (lines.empty()) {
+        system("clear");
+        std::string status = "File is empty. (q: quit)";
+        std::cout << Ansi::REVERSE << status << std::string(width - status.length(), ' ') << Ansi::RESET << std::flush;
+        while(get_char() != 'q');
+        system("clear");
+        return;
+    }
+
+    while (true) {
+        system("clear");
+        for (int i = 0; i < page_size; ++i) {
+            if (top + i < lines.size()) {
+                std::cout << lines[top + i] << std::endl;
+            }
+        }
+
+        std::string status;
+        if (top == 0 && max_top == 0) {
+            status = "(TOP/END)";
+        } else if (top == 0) {
+            status = "(TOP)";
+        } else if (top == max_top) {
+            status = "(END)";
+        } else {
+            status = "Line " + std::to_string(top + 1) + "/" + std::to_string(lines.size());
+        }
+        status += " (q:quit, n/p:scroll, f/b:page)";
+        if (status.length() > width) {
+            status = status.substr(0, width);
+        }
+        std::cout << Ansi::REVERSE << status << std::string(width - status.length(), ' ') << Ansi::RESET << std::flush;
+
+        char ch = get_char();
+
+        if (ch == 'q') {
+            system("clear");
+            break;
+        } else if (ch == 'n') {
+            if (top < max_top) {
+                top++;
+            }
+        } else if (ch == 'p') {
+            if (top > 0) {
+                top--;
+            }
+        } else if (ch == 'f' || ch == ' ') {
+            if (top < max_top) {
+                top += page_size;
+                if (top > max_top) {
+                    top = max_top;
+                }
+            }
+        } else if (ch == 'b') {
+            if (top > 0) {
+                top -= page_size;
+                if (top < 0) {
+                    top = 0;
+                }
+            }
+        }
     }
 }
 
@@ -172,7 +222,8 @@ int main(int argc, char* argv[]) {
     try {
         std::string content((std::istreambuf_iterator<char>(file)),
                            std::istreambuf_iterator<char>());
-        render_markdown(content);
+        std::vector<std::string> lines = render_markdown(content);
+        pager(lines);
     } catch (const std::exception& e) {
         std::cerr << Ansi::RED << "Error reading or rendering file: " << e.what() << Ansi::RESET << std::endl;
         return 1;

@@ -1,12 +1,14 @@
 import sys
 import re
 import os
+import tty
+import termios
 
-def get_terminal_width():
+def get_terminal_size():
     try:
-        return os.get_terminal_size().columns
+        return os.get_terminal_size().lines, os.get_terminal_size().columns
     except OSError:
-        return 80
+        return 24, 80
 
 class Ansi:
     RESET = "\033[0m"
@@ -21,72 +23,107 @@ class Ansi:
     REVERSE = "\033[7m"
 
 def render_markdown(content):
-    width = get_terminal_width()
+    _, width = get_terminal_size()
     in_code_block = False
+    rendered_lines = []
     
     for line in content.splitlines():
-        # Handle code blocks
         if line.strip() == '```':
             in_code_block = not in_code_block
-            print(Ansi.GREEN + '─' * width + Ansi.RESET)
+            rendered_lines.append(Ansi.GREEN + '─' * width + Ansi.RESET)
             continue
 
         if in_code_block:
-            print(Ansi.REVERSE + line.ljust(width) + Ansi.RESET)
+            rendered_lines.append(Ansi.REVERSE + line.ljust(width) + Ansi.RESET)
             continue
 
-        # Headings (e.g., #, ##, ###)
         if line.startswith('#'):
             level = len(line.split(' ')[0])
             text = line[level:].strip()
             if level == 1:
-                print("\n" + Ansi.BOLD + Ansi.YELLOW + text.center(width) + Ansi.RESET)
-                print((Ansi.YELLOW + '=' * len(text) + Ansi.RESET).center(width))
+                rendered_lines.append("")
+                rendered_lines.append(Ansi.BOLD + Ansi.YELLOW + text.center(width) + Ansi.RESET)
+                rendered_lines.append((Ansi.YELLOW + '=' * len(text) + Ansi.RESET).center(width))
             else:
-                print("\n" + Ansi.BOLD + Ansi.CYAN + text + Ansi.RESET)
+                rendered_lines.append("")
+                rendered_lines.append(Ansi.BOLD + Ansi.CYAN + text + Ansi.RESET)
             continue
 
-        # Horizontal Rule
         if line.strip() in ('---', '***', '___'):
-            print(Ansi.BOLD + '─' * width + Ansi.RESET)
+            rendered_lines.append(Ansi.BOLD + '─' * width + Ansi.RESET)
             continue
 
-        # Blockquotes
         if line.startswith('>'):
-            print(Ansi.YELLOW + "|" + Ansi.RESET + " " + line[1:].strip())
+            rendered_lines.append(Ansi.YELLOW + "|" + Ansi.RESET + " " + line[1:].strip())
             continue
 
-        # Unordered Lists
         if line.strip().startswith('* '):
-            print("  • " + line.strip()[2:])
+            rendered_lines.append("  • " + line.strip()[2:])
             continue
         if line.strip().startswith('- '):
-            print("  • " + line.strip()[2:])
+            rendered_lines.append("  • " + line.strip()[2:])
             continue
         
-        # Ordered Lists
         match = re.match(r'^(\d+)\.\s+(.*)', line.strip())
         if match:
             num, item = match.groups()
-            print("  " + num + ". " + item)
+            rendered_lines.append("  " + num + ". " + item)
             continue
 
-        # Images: ![alt](src)
         line = re.sub(r'!\[(.*?)\]\((.*?)\)', lambda m: Ansi.BOLD + '[Image: ' + m.group(1) + ']' + Ansi.RESET + ' (' + Ansi.UNDERLINE + m.group(2) + Ansi.RESET + ')', line)
-        
-        # Links: [text](url)
         line = re.sub(r'\[(.*?)\]\((.*?)\)', lambda m: m.group(1) + ' (' + Ansi.UNDERLINE + Ansi.BLUE + m.group(2) + Ansi.RESET + ')', line)
-
-        # Bold: **text** or __text__
         line = re.sub(r'\*\*(.*?)\*\*|__(.*?)__', lambda m: Ansi.BOLD + (m.group(1) or m.group(2)) + Ansi.RESET, line)
-        
-        # Italics: *text* or _text_ (using underline)
         line = re.sub(r'\*(.*?)\*|_(.*?)_', lambda m: Ansi.UNDERLINE + (m.group(1) or m.group(2)) + Ansi.RESET, line)
-
-        # Inline code: `code`
         line = re.sub(r'`(.*?)`', lambda m: Ansi.REVERSE + m.group(1) + Ansi.RESET, line)
 
-        print(line)
+        rendered_lines.append(line)
+    return rendered_lines
+
+def get_char():
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
+
+def pager(lines):
+    height, _ = get_terminal_size()
+    top = 0
+    
+    while True:
+        os.system('clear')
+        
+        for i in range(height -1):
+            if top + i < len(lines):
+                print(lines[top + i])
+        
+        print(Ansi.REVERSE + f"Line {top+1}/{len(lines)} (q: quit, j/k: scroll, f/b: page)".ljust(_) + Ansi.RESET, end="")
+
+        ch = get_char()
+
+        if ch == 'q':
+            os.system('clear')
+            break
+        elif ch == 'j':
+            if top + height < len(lines) + 1:
+                top += 1
+        elif ch == 'k':
+            if top > 0:
+                top -= 1
+        elif ch == 'f' or ch == ' ':
+            top += height - 1
+            if top >= len(lines):
+                top = len(lines) - (height - 1)
+            if top < 0:
+                top = 0
+
+        elif ch == 'b':
+            top -= height - 1
+            if top < 0:
+                top = 0
 
 def main():
     if len(sys.argv) != 2:
@@ -101,7 +138,10 @@ def main():
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
-        render_markdown(content)
+        
+        lines = render_markdown(content)
+        pager(lines)
+
     except Exception as e:
         print(Ansi.RED + "Error reading or rendering file: " + str(e) + Ansi.RESET)
         sys.exit(1)
