@@ -79,15 +79,27 @@ def render_markdown(content):
         rendered_lines.append(line)
     return rendered_lines
 
-def get_char():
+def get_key():
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
         ch = sys.stdin.read(1)
+        
+        # Handle arrow keys (escape sequences)
+        if ch == '\x1b':  # ESC
+            ch2 = sys.stdin.read(1)
+            if ch2 == '[':
+                ch3 = sys.stdin.read(1)
+                if ch3 == 'A':  # Up arrow
+                    return 'UP'
+                elif ch3 == 'B':  # Down arrow
+                    return 'DOWN'
+            return ch  # Return ESC if not an arrow key
+        
+        return ch
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
 
 def pager(lines):
     height, _ = get_terminal_size()
@@ -100,17 +112,17 @@ def pager(lines):
             if top + i < len(lines):
                 print(lines[top + i])
         
-        print(Ansi.REVERSE + f"Line {top+1}/{len(lines)} (q: quit, j/k: scroll, f/b: page)".ljust(_) + Ansi.RESET, end="")
+        print(Ansi.REVERSE + f"Line {top+1}/{len(lines)} (q: quit, ↑↓/j/k: scroll, f/b: page)".ljust(_) + Ansi.RESET, end="")
 
-        ch = get_char()
+        ch = get_key()
 
         if ch == 'q':
             os.system('clear')
             break
-        elif ch == 'j':
+        elif ch == 'j' or ch == 'DOWN':
             if top + height < len(lines) + 1:
                 top += 1
-        elif ch == 'k':
+        elif ch == 'k' or ch == 'UP':
             if top > 0:
                 top -= 1
         elif ch == 'f' or ch == ' ':

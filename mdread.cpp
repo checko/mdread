@@ -121,7 +121,7 @@ std::vector<std::string> render_markdown(const std::string& content) {
     return rendered_lines;
 }
 
-char get_char() {
+int get_key() {
     struct termios oldattr, newattr;
     int ch;
     tcgetattr( STDIN_FILENO, &oldattr );
@@ -129,6 +129,24 @@ char get_char() {
     newattr.c_lflag &= ~( ICANON | ECHO );
     tcsetattr( STDIN_FILENO, TCSANOW, &newattr );
     ch = getchar();
+    
+    // Handle arrow keys (escape sequences)
+    if (ch == 27) { // ESC
+        ch = getchar();
+        if (ch == 91) { // [
+            ch = getchar();
+            if (ch == 65) { // Up arrow
+                tcsetattr( STDIN_FILENO, TCSANOW, &oldattr );
+                return 1000; // Custom code for up arrow
+            } else if (ch == 66) { // Down arrow
+                tcsetattr( STDIN_FILENO, TCSANOW, &oldattr );
+                return 1001; // Custom code for down arrow
+            }
+        }
+        tcsetattr( STDIN_FILENO, TCSANOW, &oldattr );
+        return 27; // Return ESC if not an arrow key
+    }
+    
     tcsetattr( STDIN_FILENO, TCSANOW, &oldattr );
     return ch;
 }
@@ -144,7 +162,7 @@ void pager(const std::vector<std::string>& lines) {
         system("clear");
         std::string status = "File is empty. (q: quit)";
         std::cout << Ansi::REVERSE << status << std::string(width - status.length(), ' ') << Ansi::RESET << std::flush;
-        while(get_char() != 'q');
+        while(get_key() != 'q');
         system("clear");
         return;
     }
@@ -167,22 +185,22 @@ void pager(const std::vector<std::string>& lines) {
         } else {
             status = "Line " + std::to_string(top + 1) + "/" + std::to_string(lines.size());
         }
-        status += " (q:quit, n/p:scroll, f/b:page)";
+        status += " (q:quit, ↑↓/n/p:scroll, f/b:page)";
         if (status.length() > width) {
             status = status.substr(0, width);
         }
         std::cout << Ansi::REVERSE << status << std::string(width - status.length(), ' ') << Ansi::RESET << std::flush;
 
-        char ch = get_char();
+        int ch = get_key();
 
         if (ch == 'q') {
             system("clear");
             break;
-        } else if (ch == 'n') {
+        } else if (ch == 'n' || ch == 1001) { // 'n' or down arrow
             if (top < max_top) {
                 top++;
             }
-        } else if (ch == 'p') {
+        } else if (ch == 'p' || ch == 1000) { // 'p' or up arrow
             if (top > 0) {
                 top--;
             }
